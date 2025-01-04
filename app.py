@@ -189,7 +189,9 @@ class CourseDetailPopup(Popup):
         with open('./data/course_details.json', 'r', encoding='utf-8') as f:
             course_details = json.load(f)
 
-        detail = course_details.get(course_name, '暂无详细信息')['detail']
+        detail = course_details.get(course_name, '暂无详细信息')
+        if isinstance(detail, dict):
+            detail = detail.get('detail', '暂无详细信息')
 
         # 使用ColoredBoxLayout作为容器
         content = ColoredBoxLayout(
@@ -229,7 +231,7 @@ class CourseDetailPopup(Popup):
         # 创建关闭按钮
         btn_close = Button(
             text='关闭',
-            size_hint=(0.3, 0.1),  # 调整按钮大小
+            size_hint=(0.3, 0.5),  # 调整按钮大小
             pos_hint={'center_x': 0.5},  # 居中对齐
             background_normal='',
             background_color=PRIMARY_COLOR,
@@ -297,18 +299,10 @@ class ScheduleScreen(Screen):
             size_hint=(0.3, 1),
             option_cls=CustomSpinnerOption
         )
-        btn_query = Button(
-            text='查询',
-            font_name=FONT_PATH,
-            font_size=BUTTON_FONT_SIZE,
-            background_color=BUTTON_COLOR,
-            color=BUTTON_TEXT_COLOR,
-            size_hint=(0.3, 1)
-        )
-        btn_query.bind(on_press=self.query_schedule)
+        # 绑定spinner_week的文本变化事件，自动查询
+        self.spinner_week.bind(text=self.query_schedule)
 
         query_layout.add_widget(self.spinner_week)
-        query_layout.add_widget(btn_query)
 
         self.label = Label(
             text='请选择学期并查询',
@@ -464,7 +458,7 @@ class ScheduleScreen(Screen):
                 else:
                     self.update_cell_font_size(widget)
 
-    def query_schedule(self, instance):
+    def query_schedule(self, instance, value=None):
         selected_week = self.spinner_week.text
         # 提取周数
         match = re.search(r'\d+', selected_week)
@@ -512,27 +506,35 @@ class ScheduleScreen(Screen):
                         json.dump(course_data, f_write, ensure_ascii=False, indent=4)
                     
         course_list = []
-        course_details = {}
+        with open('./data/course_details.json', 'r', encoding='utf-8') as f:
+            course_details = json.load(f)
+            if 'update_time' not in course_details:
+                course_details['update_time'] = 0
         course_data.pop(-1)
         for course in course_data:
             course['c_name'] = course['c_name'].replace(' ', '').replace('Ⅱ', 'II').replace('Ⅰ', 'I').replace('Ⅲ', 'III').replace('–', '-')
-            if course['c_name'] not in course_details:
-                course_details[course['c_name']] = {}
-                course_details[course['c_name']]['rq'] = course['rq']
-            else:
-                rq = ''
-                for i in range(len(course['rq'])):
-                    if course['rq'][i] == '1' or course_details[course['c_name']]['rq'][i] == '1':
-                        rq += '1'
-                    else:
-                        rq += '0'
-                course_details[course['c_name']]['rq'] = rq
+            if time.time() - course_details['update_time'] > 86400:
+                if course['c_name'] not in course_details:
+                    course_details[course['c_name']] = {}
+                    course_details[course['c_name']]['detail'] =(
+                        f'地点: {course["school"]}{course["room_name"]}\n'
+                        f'教师: {course["teacher"]}\n上课周: '
+                    )
+                    course_details[course['c_name']]['rq'] = course['rq']
+                else:
+                    rq = ''
+                    course_details[course['c_name']]['detail'] =(
+                        f'地点: {course["school"]}{course["room_name"]}\n'
+                        f'教师: {course["teacher"]}\n上课周: '
+                    )
+                    for i in range(len(course['rq'])):
+                        if course['rq'][i] == '1' or course_details[course['c_name']]['rq'][i] == '1':
+                            rq += '1'
+                        else:
+                            rq += '0'
+                    course_details[course['c_name']]['rq'] = rq
+                
             if course['c_name'] not in course_list:
-                course_details[course['c_name']]['detail'] = (
-                    f'时间: {days[int(course["xqj"]) - 1]}{course["ksjc"]}~{course["jsjc"]}节\n'
-                    f'地点: {course["school"]}{course["room_name"]}\n'
-                    f'教师: {course["teacher"]}\n上课周: '
-                )
                 course_list.append(course['c_name'])
             if week < len(course['rq']) and course['rq'][week] == '1':  # 使用整数周数
                 xqj = days[int(course['xqj']) - 1]
@@ -559,9 +561,11 @@ class ScheduleScreen(Screen):
                     start = i
             if course_details[course]['rq'].endswith('1'):
                 course_details[course]['detail'] += f'第{start}-{len(course_details[course]["rq"])}周\n'
-            
-        with open('./data/course_details.json', 'w', encoding='utf-8') as f:
-            json.dump(course_details, f, ensure_ascii=False, indent=4)
+        
+        if time.time() - course_details['update_time'] > 86400:
+            course_details['update_time'] = time.time()
+            with open('./data/course_details.json', 'w', encoding='utf-8') as f:
+                json.dump(course_details, f, ensure_ascii=False, indent=4)
         
         # 清空现有内容和样式，仅重置课程单元格
         for widget in self.table_layout.children:
