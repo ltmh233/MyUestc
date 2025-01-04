@@ -189,7 +189,7 @@ class CourseDetailPopup(Popup):
         with open('./data/course_details.json', 'r', encoding='utf-8') as f:
             course_details = json.load(f)
 
-        detail = course_details.get(course_name, '暂无详细信息')
+        detail = course_details.get(course_name, '暂无详细信息')['detail']
 
         # 使用ColoredBoxLayout作为容器
         content = ColoredBoxLayout(
@@ -516,31 +516,50 @@ class ScheduleScreen(Screen):
         course_data.pop(-1)
         for course in course_data:
             course['c_name'] = course['c_name'].replace(' ', '').replace('Ⅱ', 'II').replace('Ⅰ', 'I').replace('Ⅲ', 'III').replace('–', '-')
+            if course['c_name'] not in course_details:
+                course_details[course['c_name']] = {}
+                course_details[course['c_name']]['rq'] = course['rq']
+            else:
+                rq = ''
+                for i in range(len(course['rq'])):
+                    if course['rq'][i] == '1' or course_details[course['c_name']]['rq'][i] == '1':
+                        rq += '1'
+                    else:
+                        rq += '0'
+                course_details[course['c_name']]['rq'] = rq
             if course['c_name'] not in course_list:
-                course_details[course['c_name']] = (
+                course_details[course['c_name']]['detail'] = (
                     f'时间: {days[int(course["xqj"]) - 1]}{course["ksjc"]}~{course["jsjc"]}节\n'
                     f'地点: {course["school"]}{course["room_name"]}\n'
                     f'教师: {course["teacher"]}\n上课周: '
                 )
-                week_ranges = []
-                start = None
-                for i, val in enumerate(course['rq']):
-                    if val == '1' and start is None:
-                        start = i + 1  # 周数从1开始
-                    elif val == '0' and start is not None:
-                        week_ranges.append(f'{start}-{i}')
-                        start = None
-                if start is not None:
-                    week_ranges.append(f'{start}-{len(course["rq"])}')
-                course_details[course['c_name']] += ', '.join(week_ranges) + '周\n'
                 course_list.append(course['c_name'])
-            if week <= len(course['rq']) and course['rq'][week] == '1':  # 使用整数周数
+            if week < len(course['rq']) and course['rq'][week] == '1':  # 使用整数周数
                 xqj = days[int(course['xqj']) - 1]
                 ksjc = int(course['ksjc'])
                 jsjc = int(course['jsjc'])
                 for i in range(ksjc, jsjc + 1):
                     sample_schedule[xqj][i - 1] = self.coursename_add(course['c_name']) + '\n \n' + self.coursename_add(course['room_name'])
 
+        for course in course_list:
+            start = 0
+            for i in range(1,len(course_details[course]['rq'])):
+                if course_details[course]['rq'][i] == '1' and course_details[course]['rq'][start] == '1':
+                    continue
+                elif course_details[course]['rq'][i] == '1' and course_details[course]['rq'][start] == '0':
+                    start = i
+                    if '周\n' in course_details[course]['detail']:
+                        course_details[course]['detail'] += ','
+                    course_details[course]['detail'] += f'第{start}'
+                elif course_details[course]['rq'][i] == '0' and course_details[course]['rq'][start] == '1':
+                    if start != i - 1:
+                        course_details[course]['detail'] += f'-{i - 1}周\n'
+                    else:
+                        course_details[course]['detail'] += f'周\n'
+                    start = i
+            if course_details[course]['rq'].endswith('1'):
+                course_details[course]['detail'] += f'第{start}-{len(course_details[course]["rq"])}周\n'
+            
         with open('./data/course_details.json', 'w', encoding='utf-8') as f:
             json.dump(course_details, f, ensure_ascii=False, indent=4)
         
