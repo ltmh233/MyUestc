@@ -47,7 +47,7 @@ class FontScaler:
     @staticmethod
     def get_base_font_size():
         # 基于窗口宽度和高度的平均值计算基础字体大小
-        return (Window.width * 0.02 + Window.height * 0.02) / 2
+        return (Window.width * 0.01 + Window.height * 0.02) / 2
     
     @staticmethod
     def get_font_sizes():
@@ -374,7 +374,7 @@ class ScheduleScreen(Screen):
                 height=self.calculate_cell_height(),
                 halign='center',
                 valign='middle',
-                text_size=(Window.width * 0.08, None),  # 增加文本宽度比例
+                text_size=(Window.width * 0.06, None),  # 增加文本宽度比例
                 padding=(2, 2),  # 添加内边距
                 row=row,
                 col=0
@@ -453,7 +453,7 @@ class ScheduleScreen(Screen):
                 widget.height = new_height
                 # 更新第一列的文本宽度
                 if '第' in widget.text and '\n' in widget.text:
-                    widget.text_size = (Window.width * 0.15, None)  # 调整为一致的宽度比例
+                    widget.text_size = (Window.width * 0.06, None)  # 调整为一致的宽度比例
                     self.adjust_time_label_font(widget)
                 else:
                     self.update_cell_font_size(widget)
@@ -507,13 +507,21 @@ class ScheduleScreen(Screen):
                     
         course_list = []
         with open('./data/course_details.json', 'r', encoding='utf-8') as f:
-            course_details = json.load(f)
-            if 'update_time' not in course_details:
+            if f.read() == '':
+                course_details = {}
                 course_details['update_time'] = 0
+                course_details['username'] = username
+            else:
+                f.seek(0)
+                course_details = json.load(f)
+                if 'update_time' not in course_details:
+                    course_details['update_time'] = 0
+                if 'username' not in course_details:
+                    course_details['username'] = 0
         course_data.pop(-1)
         for course in course_data:
             course['c_name'] = course['c_name'].replace(' ', '').replace('Ⅱ', 'II').replace('Ⅰ', 'I').replace('Ⅲ', 'III').replace('–', '-')
-            if time.time() - course_details['update_time'] > 86400:
+            if time.time() - course_details['update_time'] or course_details['username'] != username> 86400:
                 if course['c_name'] not in course_details:
                     course_details[course['c_name']] = {}
                     course_details[course['c_name']]['detail'] =(
@@ -562,8 +570,9 @@ class ScheduleScreen(Screen):
             if course_details[course]['rq'].endswith('1'):
                 course_details[course]['detail'] += f'第{start}-{len(course_details[course]["rq"])}周\n'
         
-        if time.time() - course_details['update_time'] > 86400:
+        if time.time() - course_details['update_time']  > 86400 or username != course_details['username']:
             course_details['update_time'] = time.time()
+            course_details['username'] = username
             with open('./data/course_details.json', 'w', encoding='utf-8') as f:
                 json.dump(course_details, f, ensure_ascii=False, indent=4)
         
@@ -723,6 +732,12 @@ class SettingsScreen(Screen):
             with open(CREDENTIALS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(credentials, f, ensure_ascii=False, indent=4)
             self.status_label.text = '账号和密码已保存'
+            # 新增：保存后更新课表
+            app = App.get_running_app()
+            schedule_screen = app.sm.get_screen('schedule')
+            current_week = get_current_week()
+            schedule_screen.spinner_week.text = f'第{current_week}周 (当前周)'
+            schedule_screen.query_schedule(None)
         except Exception as e:
             self.status_label.text = f'保存失败: {e}'
     
