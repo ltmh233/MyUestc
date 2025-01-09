@@ -3,6 +3,8 @@ import re
 import os
 import datetime
 import time
+from kivy.animation import Animation
+import threading
 import requests
 from kivy.properties import ListProperty
 from kivy.app import App
@@ -26,11 +28,12 @@ PRIMARY_COLOR = [0.20, 0.60, 0.86, 1]      # 主色调蓝色
 SECONDARY_COLOR = [0.95, 0.95, 0.95, 1]    # 次色调浅灰色
 BUTTON_COLOR = [0.20, 0.60, 0.86, 1]       # 按钮蓝色
 BUTTON_TEXT_COLOR = [1, 1, 1, 1]           # 按钮白色文本
-LABEL_TEXT_COLOR = [0, 0, 0, 1]            # 标签黑色文本
+LABEL_TEXT_COLOR_DARK = [0, 0, 0, 1]       # 标签黑色文本
+LABEL_TEXT_COLOR_LIGHT = [1, 1, 1, 1]      # 标签白色文本      
 INPUT_BACKGROUND_COLOR = [1, 1, 1, 1]      # 输入框白色背景
 INPUT_TEXT_COLOR = [0, 0, 0, 1]            # 输入框黑色文本
 POPUP_BACKGROUND_COLOR = [1, 1, 1, 1]      # 弹窗白色背景
-POPUP_CONTENT_COLOR = [0.98, 0.98, 0.98, 1]# 弹窗内容区域浅灰色
+POPUP_CONTENT_COLOR = [1, 1, 1, 1]         # 弹窗内容区域
 
 CREDENTIALS_FILE = './data/credentials.json'      # 保存账号密码的文件
 FONT_PATH = './font/MapleMono-SC-NF-Regular.ttf'  # 字体文件路径
@@ -41,7 +44,7 @@ LABEL_FONT_SIZE = BASE_FONT_SIZE
 BUTTON_FONT_SIZE = BASE_FONT_SIZE
 SPINNER_FONT_SIZE = BASE_FONT_SIZE
 POPUP_TITLE_FONT_SIZE = 32
-POPUP_CONTENT_FONT_SIZE = 48
+POPUP_CONTENT_FONT_SIZE = 32
 
 class FontScaler:
     @staticmethod
@@ -61,6 +64,66 @@ class FontScaler:
             'popup_content': base * 1.1
         }
 
+class CustomPopup(Popup):
+    def __init__(self, title_text='', content_widget=None, **kwargs):
+        super(CustomPopup, self).__init__(**kwargs)
+        self.background = ''  # 移除默认背景
+        self.title = ''  # 移除默认标题
+        self.title_size = 0  # 移除标题空间
+
+        self.size_hint = kwargs.get('size_hint', (0.5, 0.5))
+        self.auto_dismiss = kwargs.get('auto_dismiss', True)
+        self.background_color = [0, 0, 0, 0]  # 设置为完全透明
+
+        # 创建一个纯白色带圆角的背景
+        with self.canvas.before:
+            Color(0.7, 0.7, 0.7, 1)  # 存在BUG
+            self.bg_rect = RoundedRectangle(size=self.size, pos=self.pos, radius=[20])
+
+        self.bind(size=self.update_canvas, pos=self.update_canvas)
+
+        # 创建内容布局
+        layout = BoxLayout(orientation='vertical', spacing=20, padding=20)
+
+        if title_text:
+            self.title_label = Label(
+                text=title_text,
+                font_name=FONT_PATH,
+                font_size=POPUP_TITLE_FONT_SIZE,
+                size_hint=(1, 0.2),
+                halign='center',
+                valign='middle'
+            )
+            self.title_label.bind(size=self.title_label.setter('text_size'))
+            layout.add_widget(self.title_label)
+
+        if content_widget:
+            layout.add_widget(content_widget)
+
+        self.content = layout
+
+    def update_canvas(self, *args):
+        # 更新圆角背景的位置和大小
+        self.bg_rect.size = self.size
+        self.bg_rect.pos = self.pos
+
+    def on_open(self):
+        """
+        当弹窗打开时，调整标题标签以确保完整显示。
+        """
+        if hasattr(self, 'title_label'):
+            self.title_label.bind(width=self.update_title_text_size)
+
+    def update_title_text_size(self, instance, width):
+        """
+        更新标题标签的文本大小以适应弹窗宽度。
+
+        参数:
+            instance: 被绑定的实例。
+            width (float): 当前弹窗的宽度。
+        """
+        instance.text_size = (width * 0.9, None)  # 设置文本宽度为弹窗宽度的90%
+
 class ColoredBoxLayout(BoxLayout):
     def __init__(self, **kwargs):
         self.bg_color = kwargs.pop('bg_color', SECONDARY_COLOR)
@@ -79,6 +142,28 @@ class CustomSpinnerOption(SpinnerOption):
         super(CustomSpinnerOption, self).__init__(**kwargs)
         self.font_name = FONT_PATH
         self.font_size = SPINNER_FONT_SIZE
+        self.original_background_color = self.background_color  # 保存原始颜色
+        self.original_size = self.size  # 保存原始大小
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            # 增强背景颜色变化
+            anim_bg = Animation(background_color=[0.4, 0.8, 1, 1], duration=0.1)
+            # 添加缩放动画，通过改变size
+            anim_size = Animation(size=(self.width * 1.1, self.height * 1.1), duration=0.1)
+            anim = anim_bg & anim_size
+            anim.start(self)
+        return super(CustomSpinnerOption, self).on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        if self.collide_point(*touch.pos):
+            # 恢复背景颜色
+            anim_bg = Animation(background_color=self.original_background_color, duration=0.1)
+            # 恢复大小
+            anim_size = Animation(size=self.original_size, duration=0.1)
+            anim = anim_bg & anim_size
+            anim.start(self)
+        return super(CustomSpinnerOption, self).on_touch_up(touch)
 
 class BorderedLabel(ButtonBehavior, Label):
     background_color = ListProperty([1, 1, 1, 1])
@@ -175,77 +260,92 @@ class BorderedLabel(ButtonBehavior, Label):
             course_name = ''.join(self.text.split(' ')[0].split('\n')[0:-1])
             CourseDetailPopup(course_name=course_name).open()
 
-class CourseDetailPopup(Popup):
+class CourseDetailPopup(CustomPopup):
     def __init__(self, course_name, **kwargs):
-        super(CourseDetailPopup, self).__init__(**kwargs)
-        self.title = f"{course_name} 详细信息"
-        self.size_hint = (0.5, 0.4)  # 减小弹窗大小
-        self.auto_dismiss = True
-        self.background_color = POPUP_BACKGROUND_COLOR
-        self.separator_color = PRIMARY_COLOR
-        self.title_font = FONT_PATH
-        self.title_size = POPUP_TITLE_FONT_SIZE
+        # 初始化详细信息为默认消息
+        detail = '暂无详细信息'
+        try:
+            # 尝试从JSON文件中加载课程详细信息
+            with open('./data/course_details.json', 'r', encoding='utf-8') as f:
+                course_details = json.load(f)
+            # 获取指定课程的详细信息
+            detail = course_details.get(course_name, '暂无详细信息')
+            if isinstance(detail, dict):
+                detail = detail.get('detail', '暂无详细信息')
+        except:
+            pass  # 如果读取文件失败，保持默认消息
 
-        with open('./data/course_details.json', 'r', encoding='utf-8') as f:
-            course_details = json.load(f)
+        # 创建一个可滚动的视图来显示详细信息
+        content = ScrollView(size_hint=(1, 0.8))
 
-        detail = course_details.get(course_name, '暂无详细信息')
-        if isinstance(detail, dict):
-            detail = detail.get('detail', '暂无详细信息')
-
-        # 使用ColoredBoxLayout作为容器
-        content = ColoredBoxLayout(
-            orientation='vertical',
-            padding=20,
-            spacing=10,
-            bg_color=POPUP_CONTENT_COLOR,
-            size_hint=(1, 1)
-        )
-
-        # 创建可滚动区域
-        scroll_view = ScrollView(size_hint=(1, 0.8))  # 调整大小以适应弹窗
-
-        # 内容标签使用BoxLayout包装以确保正确填充
+        # 创建一个垂直布局，用于容纳详细信息标签
         label_container = BoxLayout(orientation='vertical', size_hint=(1, None))
         label_container.bind(minimum_height=label_container.setter('height'))
 
-        # 创建显示详细信息的标签
+        # 创建详细信息标签
         detail_label = Label(
             text=detail,
             font_name=FONT_PATH,
-            font_size=POPUP_CONTENT_FONT_SIZE,  # 使用增大的字体大小
-            color=LABEL_TEXT_COLOR,
+            font_size=POPUP_CONTENT_FONT_SIZE,
+            color=LABEL_TEXT_COLOR_LIGHT,
             size_hint_y=None,
             halign='left',
-            valign='top'
+            valign='top',
+            text_size=(self.width * 0.9, None),  # 设置文本宽度为弹窗宽度的90%
+            padding=(10, 10)  # 添加内边距以防止文本紧贴边缘
         )
-        # 绑定宽度变化事件来更新文本区域大小
+        # 绑定标签的宽度变化以自动调整文本区域
         detail_label.bind(
-            width=lambda lb, w: lb.setter('text_size')(lb, (lb.width, None)),
+            width=lambda lb, w: lb.setter('text_size')(lb, (w, None)),
             texture_size=lambda lb, ts: setattr(lb, 'height', ts[1])
         )
 
         label_container.add_widget(detail_label)
-        scroll_view.add_widget(label_container)
+        content.add_widget(label_container)
 
         # 创建关闭按钮
         btn_close = Button(
             text='关闭',
-            size_hint=(0.3, 0.5),  # 调整按钮大小
-            pos_hint={'center_x': 0.5},  # 居中对齐
+            size_hint=(0.3, 0.2),
+            pos_hint={'center_x': 0.5},
             background_normal='',
             background_color=PRIMARY_COLOR,
             color=BUTTON_TEXT_COLOR,
             font_name=FONT_PATH,
             font_size=BUTTON_FONT_SIZE
         )
-        btn_close.bind(on_press=self.dismiss)
+        btn_close.bind(on_press=self.dismiss)  # 绑定按钮点击事件以关闭弹窗
 
-        # 添加组件到内容容器
-        content.add_widget(scroll_view)
-        content.add_widget(btn_close)
+        # 创建主内容布局，包含详细信息和关闭按钮
+        main_content = BoxLayout(orientation='vertical', spacing=10, padding=10)
+        main_content.add_widget(content)
+        main_content.add_widget(btn_close)
 
-        self.content = content
+        # 初始化父类CustomPopup
+        super(CourseDetailPopup, self).__init__(
+            title_text=f"{course_name} 详细信息",  # 设置弹窗标题为课程名称加详细信息
+            content_widget=main_content,
+            size_hint=(0.6, 0.5),  # 增加高度以确保标题显示完全
+            auto_dismiss=True,
+            #background_color=POPUP_BACKGROUND_COLOR
+        )
+
+    def on_open(self):
+        """
+        当弹窗打开时，调整标题标签以确保完整显示。
+        """
+        if hasattr(self, 'title_label'):
+            self.title_label.bind(width=self.update_title_text_size)
+
+    def update_title_text_size(self, instance, width):
+        """
+        更新标题标签的文本大小以适应弹窗宽度。
+
+        参数:
+            instance: 被绑定的实例。
+            width (float): 当前弹窗的宽度。
+        """
+        instance.text_size = (width * 0.9, None)  # 设置文本宽度为弹窗宽度的90%
 
 class SwipeScreenManager(ScreenManager):
     def __init__(self, **kwargs):
@@ -308,7 +408,7 @@ class ScheduleScreen(Screen):
             text='请选择学期并查询',
             font_name=FONT_PATH,
             font_size=LABEL_FONT_SIZE,
-            color=LABEL_TEXT_COLOR,
+            color=LABEL_TEXT_COLOR_DARK,
             size_hint=(1, 0.1),
             halign='center',
             valign='middle'
@@ -343,7 +443,7 @@ class ScheduleScreen(Screen):
             header_label = BorderedLabel(
                 text=f'[b]{header}[/b]',
                 font_name=FONT_PATH,
-                color=LABEL_TEXT_COLOR,
+                color=LABEL_TEXT_COLOR_DARK,
                 background_color=SECONDARY_COLOR,  # 指定初始背景颜色
                 size_hint=(1, None),
                 height=self.calculate_cell_height(),
@@ -368,7 +468,7 @@ class ScheduleScreen(Screen):
             time_label = BorderedLabel(
                 text=f'第{row}节\n{courge_time[row-1]}',
                 font_name=FONT_PATH,
-                color=LABEL_TEXT_COLOR,
+                color=LABEL_TEXT_COLOR_DARK,
                 background_color=SECONDARY_COLOR,  # 指定初始背景颜色
                 size_hint=(1, None),
                 height=self.calculate_cell_height(),
@@ -389,7 +489,7 @@ class ScheduleScreen(Screen):
                 self.table_layout.add_widget(BorderedLabel(
                     text='',
                     font_name=FONT_PATH,
-                    color=LABEL_TEXT_COLOR,
+                    color=LABEL_TEXT_COLOR_DARK,
                     background_color=SECONDARY_COLOR,  # 指定初始背景颜色
                     size_hint=(1, None),
                     height=self.calculate_cell_height(),
@@ -459,12 +559,13 @@ class ScheduleScreen(Screen):
                     self.update_cell_font_size(widget)
 
     def query_schedule(self, instance, value=None):
-        selected_week = self.spinner_week.text
-        # 提取周数
-        match = re.search(r'\d+', selected_week)
-        if match:
-            week_number = int(match.group())
-            self.populate_table(week_number)
+            selected_week = self.spinner_week.text
+            # 提取周数
+            match = re.search(r'\d+', selected_week)
+            if match:
+                week_number = int(match.group())
+                # 使用 Clock.schedule_once 确保在主线程中执行动画
+                Clock.schedule_once(lambda dt: self.populate_table(week_number))
     
     def coursename_add(self, coursename):
         coursename = [coursename[i:i+4] for i in range(0, len(coursename), 4)]
@@ -521,7 +622,7 @@ class ScheduleScreen(Screen):
         course_data.pop(-1)
         for course in course_data:
             course['c_name'] = course['c_name'].replace(' ', '').replace('Ⅱ', 'II').replace('Ⅰ', 'I').replace('Ⅲ', 'III').replace('–', '-')
-            if time.time() - course_details['update_time'] or course_details['username'] != username> 86400:
+            if time.time() - course_details['update_time'] > 86400 or course_details['username'] != username:
                 if course['c_name'] not in course_details:
                     course_details[course['c_name']] = {}
                     course_details[course['c_name']]['detail'] =(
@@ -640,7 +741,7 @@ class GradesScreen(Screen):
             text='成绩查询界面',
             font_name=FONT_PATH,
             font_size=LABEL_FONT_SIZE,
-            color=LABEL_TEXT_COLOR,
+            color=LABEL_TEXT_COLOR_DARK,
             halign='center',
             valign='middle'
         )
@@ -656,7 +757,7 @@ class NotificationsScreen(Screen):
             text='通知中心',
             font_name=FONT_PATH,
             font_size=LABEL_FONT_SIZE,
-            color=LABEL_TEXT_COLOR,
+            color=LABEL_TEXT_COLOR_DARK,
             halign='center',
             valign='middle'
         )
@@ -664,11 +765,24 @@ class NotificationsScreen(Screen):
         layout.add_widget(self.label)
         self.add_widget(layout)
 
+
 class SettingsScreen(Screen):
     def __init__(self, **kwargs):
         super(SettingsScreen, self).__init__(**kwargs)
         layout = ColoredBoxLayout(orientation='vertical', bg_color=SECONDARY_COLOR)
         
+        self.loading_popup = CustomPopup(
+            title_text='保存中...',
+            content_widget=Label(
+                text='请稍候...',
+                font_name=FONT_PATH,
+                font_size=POPUP_CONTENT_FONT_SIZE,
+                halign='center',
+                valign='middle'
+            ),
+            size_hint=(0.3, 0.3),
+            auto_dismiss=False
+        )
         self.username_input = TextInput(
             hint_text='用户名',
             font_name=FONT_PATH,
@@ -695,12 +809,13 @@ class SettingsScreen(Screen):
             size_hint=(1, 0.1)
         )
         save_btn.bind(on_press=self.save_credentials)
+        self.save_btn = save_btn  # 保存按钮引用以便动画使用
 
         self.status_label = Label(
             text='',
             font_name=FONT_PATH,
             font_size=LABEL_FONT_SIZE,
-            color=LABEL_TEXT_COLOR,
+            color=LABEL_TEXT_COLOR_DARK,
             size_hint=(1, 0.1),
             halign='center',
             valign='middle'
@@ -711,7 +826,7 @@ class SettingsScreen(Screen):
             text='设置界面',
             font_name=FONT_PATH,
             font_size=LABEL_FONT_SIZE,
-            color=LABEL_TEXT_COLOR,
+            color=LABEL_TEXT_COLOR_DARK,
             size_hint=(1, 0.1),
             halign='center',
             valign='middle'
@@ -723,23 +838,55 @@ class SettingsScreen(Screen):
         
         self.add_widget(layout)
         self.load_credentials()
-    
+
     def save_credentials(self, instance):
-        username = self.username_input.text
-        password = self.password_input.text
-        credentials = {'username': username, 'password': password}
+        # 显示加载弹窗
+        self.loading_popup.open()
+        self.save_btn.disabled = True
+
+        # 在线程中执行保存操作
+        threading.Thread(target=self._save_credentials_thread, daemon=True).start()
+    
+    def _save_credentials_thread(self):
         try:
+            username = self.username_input.text
+            password = self.password_input.text
+            credentials = {'username': username, 'password': password}
+            
             with open(CREDENTIALS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(credentials, f, ensure_ascii=False, indent=4)
-            self.status_label.text = '账号和密码已保存'
-            # 新增：保存后更新课表
+            status_text = '账号和密码已保存'
+            
             app = App.get_running_app()
             schedule_screen = app.sm.get_screen('schedule')
             current_week = get_current_week()
-            schedule_screen.spinner_week.text = f'第{current_week}周 (当前周)'
-            schedule_screen.query_schedule(None)
+            
+            # 准备UI更新操作
+            def update_ui(dt):
+                self.status_label.text = status_text
+                schedule_screen.spinner_week.text = f'第{current_week}周 (当前周)'
+                schedule_screen.query_schedule(None)
+                # 关闭加载弹窗并恢复按钮状态
+                self.loading_popup.dismiss()
+                self.save_btn.disabled = False
+            
+            Clock.schedule_once(update_ui)
         except Exception as e:
-            self.status_label.text = f'保存失败: {e}'
+            status_text = f'保存失败: {e}'
+            
+            def update_ui_error(dt):
+                self.status_label.text = status_text
+                # 关闭加载弹窗并恢复按钮状态
+                self.loading_popup.dismiss()
+                self.save_btn.disabled = False
+            
+            Clock.schedule_once(update_ui_error)
+
+    def _update_ui_after_save(self, status_text):
+        self.status_label.text = status_text
+        # 关闭加载弹窗并恢复按钮状态
+        self.loading_popup.dismiss()
+        self.save_btn.disabled = False
     
     def load_credentials(self):
         if os.path.exists(CREDENTIALS_FILE):
