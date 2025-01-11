@@ -390,19 +390,65 @@ class ScheduleScreen(Screen):
         Window.bind(size=self.on_window_resize)
 
         query_layout = BoxLayout(orientation='horizontal', size_hint=(1, 0.1), spacing=10, padding=10)
-        current_week = get_current_week()
-        self.spinner_week = Spinner(
-            text=f'第{current_week}周 (当前周)',  # 添加“(当前周)”
-            values=[f'第{week}周' + (' (当前周)' if week == current_week else '') for week in range(1, 21)],
+        self.days = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
+        self.sample_schedule = {day: [''] * 12 for day in self.days}
+            
+            # 添加“上一周”按钮
+        btn_prev_week = Button(
+            text='上一周',
             font_name=FONT_PATH,
-            font_size=SPINNER_FONT_SIZE,
-            size_hint=(0.3, 1),
+                # 移除固定的字体大小设置
+                # font_size=SPINNER_FONT_SIZE,
+            size_hint=(0.2, 1),
+            background_color=BUTTON_COLOR,
+            color=BUTTON_TEXT_COLOR
+        )
+        btn_prev_week.bind(on_press=self.prev_week)
+
+        with open('./data/credentials.json', 'r', encoding='utf-8') as f:
+            credentials = json.load(f)
+            username = credentials.get('username', '')
+            current_week = credentials.get('currentweek','')
+            update_week = credentials.get('update_week','')
+        
+        if int(time.strftime('%W')) - int(update_week) > 0:
+            current_week = get_current_week()
+            credentials['currentweek'] = current_week
+            credentials['update_week'] = time.strftime('%W')
+            with open('./data/credentials.json', 'w', encoding='utf-8') as f:
+                json.dump(credentials, f, ensure_ascii=False, indent=4)
+        
+        self.current_week = current_week
+        self.outstanding_current_week = current_week
+            
+            # 修改spinner_week的size_hint以适应新增按钮
+        self.spinner_week = Spinner(
+            text=f'第{self.current_week}周 (当前周)',
+            values=[f'第{week}周' + (' (当前周)' if week == self.current_week else '') for week in range(1, 21)],
+            font_name=FONT_PATH,
+                # 移除固定的字体大小设置
+                # font_size=SPINNER_FONT_SIZE,
+            size_hint=(0.6, 1),
             option_cls=CustomSpinnerOption
         )
-        # 绑定spinner_week的文本变化事件，自动查询
+            # 绑定spinner_week的文本变化事件，自动查询
         self.spinner_week.bind(text=self.query_schedule)
 
+            # 添加“下一周”按钮
+        btn_next_week = Button(
+            text='下一周',
+            font_name=FONT_PATH,
+                # 移除固定的字体大小设置
+                # font_size=SPINNER_FONT_SIZE,
+            size_hint=(0.2, 1),
+            background_color=BUTTON_COLOR,
+            color=BUTTON_TEXT_COLOR
+        )
+        btn_next_week.bind(on_press=self.next_week)
+
+        query_layout.add_widget(btn_prev_week)
         query_layout.add_widget(self.spinner_week)
+        query_layout.add_widget(btn_next_week)
 
         self.label = Label(
             text='请选择学期并查询',
@@ -416,7 +462,7 @@ class ScheduleScreen(Screen):
         self.label.bind(size=self.label.setter('text_size'))
 
         layout.add_widget(query_layout)
-
+        
         scroll_view = ScrollView(size_hint=(1, 0.8))
         self.table_layout = GridLayout(
             cols=8, 
@@ -498,17 +544,125 @@ class ScheduleScreen(Screen):
                     row=row,
                     col=col
                 ))
+     
+        with open('./data/course.json', 'r', encoding='utf-8') as f:
+            if f.read() == '':
+                course_data = get_course_schedule(username)
+                course_data.append({'username': username, 'update_time': time.time()})
+                with open('./data/course.json', 'w', encoding='utf-8') as f_write:
+                    json.dump(course_data, f_write, ensure_ascii=False, indent=4)
+            else:
+                f.seek(0)
+                course_data = json.load(f)
+                if not course_data or course_data[-1]['username'] != username or time.time() - course_data[-1]['update_time'] > 86400:
+                    course_data = get_course_schedule(username)
+                    course_data.append({'username': username, 'update_time': time.time()})
+                    with open('./data/course.json', 'w', encoding='utf-8') as f_write:
+                        json.dump(course_data, f_write, ensure_ascii=False, indent=4)
+                    
+        self.course_list = []
+        with open('./data/course_details.json', 'r', encoding='utf-8') as f:
+            if f.read() == '':
+                course_details = {}
+                course_details['update_time'] = 0
+                course_details['username'] = username
+            else:
+                f.seek(0)
+                course_details = json.load(f)
+                if 'username' not in course_details:
+                    course_details['username'] = ''
+                elif 'usename' != course_details['username']:
+                    course_details.clear()
+                    course_details['username'] = ''
+                if 'update_time' not in course_details:
+                    course_details['update_time'] = 0
+        course_data.pop(-1)
+        self.course_data = course_data
+        for course in course_data:
+            course['c_name'] = course['c_name'].replace(' ', '').replace('Ⅱ', 'II').replace('Ⅰ', 'I').replace('Ⅲ', 'III').replace('–', '-')
+            if time.time() - course_details['update_time'] > 86400 or course_details['username'] != username:
+                if course['c_name'] not in course_details:
+                    course_details[course['c_name']] = {}
+                    course_details[course['c_name']]['detail'] =(
+                        f'地点: {course["school"]}{course["room_name"]}\n'
+                        f'教师: {course["teacher"]}\n上课周: '
+                    )
+                    course_details[course['c_name']]['rq'] = course['rq']
+                else:
+                    rq = ''
+                    course_details[course['c_name']]['detail'] =(
+                        f'地点: {course["school"]}{course["room_name"]}\n'
+                        f'教师: {course["teacher"]}\n上课周: '
+                    )
+                    for i in range(len(course['rq'])):
+                        if course['rq'][i] == '1' or course_details[course['c_name']]['rq'][i] == '1':
+                            rq += '1'
+                        else:
+                            rq += '0'
+                    course_details[course['c_name']]['rq'] = rq
+                
+            if course['c_name'] not in self.course_list:
+                self.course_list.append(course['c_name'])
+            if current_week < len(course['rq']) and course['rq'][current_week] == '1':  # 使用整数周数
+                xqj = self.days[int(course['xqj']) - 1]
+                ksjc = int(course['ksjc'])
+                jsjc = int(course['jsjc'])
+                for i in range(ksjc, jsjc + 1):
+                    self.sample_schedule[xqj][i - 1] = self.coursename_add(course['c_name']) + '\n \n' + self.coursename_add(course['room_name'])
 
+        for course in self.course_list:
+            start = 0
+            for i in range(1,len(course_details[course]['rq'])):
+                if course_details[course]['rq'][i] == '1' and course_details[course]['rq'][start] == '1':
+                    continue
+                elif course_details[course]['rq'][i] == '1' and course_details[course]['rq'][start] == '0':
+                    start = i
+                    if '周\n' in course_details[course]['detail']:
+                        course_details[course]['detail'] += ','
+                    course_details[course]['detail'] += f'第{start}'
+                elif course_details[course]['rq'][i] == '0' and course_details[course]['rq'][start] == '1':
+                    if start != i - 1:
+                        course_details[course]['detail'] += f'-{i - 1}周\n'
+                    else:
+                        course_details[course]['detail'] += f'周\n'
+                    start = i
+            if course_details[course]['rq'].endswith('1'):
+                course_details[course]['detail'] += f'第{start}-{len(course_details[course]["rq"])}周\n'
+        
+        if time.time() - course_details['update_time']  > 86400 or username != course_details['username']:
+            course_details['update_time'] = time.time()
+            course_details['username'] = username
+            with open('./data/course_details.json', 'w', encoding='utf-8') as f:
+                json.dump(course_details, f, ensure_ascii=False, indent=4)
+        
         scroll_view.add_widget(self.table_layout)
         layout.add_widget(scroll_view)
         self.add_widget(layout)
                 
         self.query_schedule(None)
 
+    def prev_week(self, instance):
+        if self.outstanding_current_week > 1:
+            self.outstanding_current_week -= 1
+            self.update_week()
+            
+    def next_week(self, instance):
+        if self.outstanding_current_week < 20:
+            self.outstanding_current_week += 1
+            self.update_week()
+            
+    def update_week(self):
+        # 更新spinner_week的文本
+        self.spinner_week.text = f'第{self.outstanding_current_week}周'
+        # 更新spinner_week的值列表
+        self.spinner_week.values = [f'第{week}周' + (' (当前周)' if week == self.current_week else '') for week in range(1, 21)]
+        # 调用查询方法刷新表格
+        self.query_schedule(None)
+
     def get_week_dates(self, week_number):
         """获取指定周数每一天的日期，格式为MM月DD日"""
         today = datetime.date.today()
-        current_week_number = get_current_week()
+        current_week_number = self.current_week
         # 计算目标周与当前周的差值
         week_diff = week_number - current_week_number
         # 获取当前周的星期一
@@ -564,6 +718,7 @@ class ScheduleScreen(Screen):
             match = re.search(r'\d+', selected_week)
             if match:
                 week_number = int(match.group())
+                self.outstanding_current_week = week_number
                 # 使用 Clock.schedule_once 确保在主线程中执行动画
                 Clock.schedule_once(lambda dt: self.populate_table(week_number))
     
@@ -574,6 +729,18 @@ class ScheduleScreen(Screen):
     
     def populate_table(self, week):
         # 获取指定周的日期
+        with open('./data/credentials.json', 'r', encoding='utf-8') as f:
+            credentials = json.load(f)
+            update_week = credentials.get('update_week','')
+        
+        if int(time.strftime('%W')) - int(update_week) > 0:
+            current_week = get_current_week()
+            self.current_week = current_week
+            credentials['currentweek'] = current_week
+            credentials['update_week'] = time.strftime('%W')
+            with open('./data/credentials.json', 'w', encoding='utf-8') as f:
+                json.dump(credentials, f, ensure_ascii=False, indent=4)
+        
         week_dates = self.get_week_dates(week)
         
         # 更新标题行的文本
@@ -585,98 +752,6 @@ class ScheduleScreen(Screen):
         for header_widget, header_text in zip(self.header_widgets, headers):
             header_widget.text = f'[b]{header_text}[/b]'
         
-        days = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
-        sample_schedule = {day: [''] * 12 for day in days}
-        
-        with open('./data/credentials.json', 'r', encoding='utf-8') as f:
-            username = json.load(f).get('username', '')
-            
-        with open('./data/course.json', 'r', encoding='utf-8') as f:
-            if f.read() == '':
-                course_data = get_course_schedule(username)
-                course_data.append({'username': username, 'update_time': time.time()})
-                with open('./data/course.json', 'w', encoding='utf-8') as f_write:
-                    json.dump(course_data, f_write, ensure_ascii=False, indent=4)
-            else:
-                f.seek(0)
-                course_data = json.load(f)
-                if not course_data or course_data[-1]['username'] != username or time.time() - course_data[-1]['update_time'] > 86400:
-                    course_data = get_course_schedule(username)
-                    course_data.append({'username': username, 'update_time': time.time()})
-                    with open('./data/course.json', 'w', encoding='utf-8') as f_write:
-                        json.dump(course_data, f_write, ensure_ascii=False, indent=4)
-                    
-        course_list = []
-        with open('./data/course_details.json', 'r', encoding='utf-8') as f:
-            if f.read() == '':
-                course_details = {}
-                course_details['update_time'] = 0
-                course_details['username'] = username
-            else:
-                f.seek(0)
-                course_details = json.load(f)
-                if 'update_time' not in course_details:
-                    course_details['update_time'] = 0
-                if 'username' not in course_details:
-                    course_details['username'] = 0
-        course_data.pop(-1)
-        for course in course_data:
-            course['c_name'] = course['c_name'].replace(' ', '').replace('Ⅱ', 'II').replace('Ⅰ', 'I').replace('Ⅲ', 'III').replace('–', '-')
-            if time.time() - course_details['update_time'] > 86400 or course_details['username'] != username:
-                if course['c_name'] not in course_details:
-                    course_details[course['c_name']] = {}
-                    course_details[course['c_name']]['detail'] =(
-                        f'地点: {course["school"]}{course["room_name"]}\n'
-                        f'教师: {course["teacher"]}\n上课周: '
-                    )
-                    course_details[course['c_name']]['rq'] = course['rq']
-                else:
-                    rq = ''
-                    course_details[course['c_name']]['detail'] =(
-                        f'地点: {course["school"]}{course["room_name"]}\n'
-                        f'教师: {course["teacher"]}\n上课周: '
-                    )
-                    for i in range(len(course['rq'])):
-                        if course['rq'][i] == '1' or course_details[course['c_name']]['rq'][i] == '1':
-                            rq += '1'
-                        else:
-                            rq += '0'
-                    course_details[course['c_name']]['rq'] = rq
-                
-            if course['c_name'] not in course_list:
-                course_list.append(course['c_name'])
-            if week < len(course['rq']) and course['rq'][week] == '1':  # 使用整数周数
-                xqj = days[int(course['xqj']) - 1]
-                ksjc = int(course['ksjc'])
-                jsjc = int(course['jsjc'])
-                for i in range(ksjc, jsjc + 1):
-                    sample_schedule[xqj][i - 1] = self.coursename_add(course['c_name']) + '\n \n' + self.coursename_add(course['room_name'])
-
-        for course in course_list:
-            start = 0
-            for i in range(1,len(course_details[course]['rq'])):
-                if course_details[course]['rq'][i] == '1' and course_details[course]['rq'][start] == '1':
-                    continue
-                elif course_details[course]['rq'][i] == '1' and course_details[course]['rq'][start] == '0':
-                    start = i
-                    if '周\n' in course_details[course]['detail']:
-                        course_details[course]['detail'] += ','
-                    course_details[course]['detail'] += f'第{start}'
-                elif course_details[course]['rq'][i] == '0' and course_details[course]['rq'][start] == '1':
-                    if start != i - 1:
-                        course_details[course]['detail'] += f'-{i - 1}周\n'
-                    else:
-                        course_details[course]['detail'] += f'周\n'
-                    start = i
-            if course_details[course]['rq'].endswith('1'):
-                course_details[course]['detail'] += f'第{start}-{len(course_details[course]["rq"])}周\n'
-        
-        if time.time() - course_details['update_time']  > 86400 or username != course_details['username']:
-            course_details['update_time'] = time.time()
-            course_details['username'] = username
-            with open('./data/course_details.json', 'w', encoding='utf-8') as f:
-                json.dump(course_details, f, ensure_ascii=False, indent=4)
-        
         # 清空现有内容和样式，仅重置课程单元格
         for widget in self.table_layout.children:
             if isinstance(widget, BorderedLabel):
@@ -684,6 +759,15 @@ class ScheduleScreen(Screen):
                     widget.text = ''
                     widget.background_color = widget.initial_background_color  # 使用初始化的颜色
                     widget.update_background_color(widget, widget.background_color)  # 调用更新方法
+        
+        self.sample_schedule = {day: [''] * 12 for day in self.days}
+        for course in self.course_data:
+            if week < len(course['rq']) and course['rq'][week] == '1':  # 使用整数周数
+                xqj = self.days[int(course['xqj']) - 1]
+                ksjc = int(course['ksjc'])
+                jsjc = int(course['jsjc'])
+                for i in range(ksjc, jsjc + 1):
+                    self.sample_schedule[xqj][i - 1] = self.coursename_add(course['c_name']) + '\n \n' + self.coursename_add(course['room_name'])
         
         # 填充课程信息
         color_list = [
@@ -720,8 +804,8 @@ class ScheduleScreen(Screen):
             [0.95, 0.20, 0.60, 1],   # 热粉色
             [0.10, 0.60, 0.70, 1],   # 青绿色
         ]
-        for day_index, day in enumerate(days, 1):
-            courses = sample_schedule.get(day, [])
+        for day_index, day in enumerate(self.days, 1):
+            courses = self.sample_schedule.get(day, [])
             for period_index, course in enumerate(courses, 1):
                 if course:
                     course_name = ''.join(course.split(' ')[0].split('\n')[0:-1])
@@ -731,7 +815,7 @@ class ScheduleScreen(Screen):
                         if target_widget.row != 0 and target_widget.col != 0:
                             target_widget.text = course
                             # 设置背景颜色并添加多层渐变效果
-                            target_widget.background_color = color_list[course_list.index(course_name) % len(color_list)]
+                            target_widget.background_color = color_list[self.course_list.index(course_name) % len(color_list)]
                             
 class GradesScreen(Screen):
     def __init__(self, **kwargs):
@@ -767,137 +851,142 @@ class NotificationsScreen(Screen):
 
 
 class SettingsScreen(Screen):
-    def __init__(self, **kwargs):
-        super(SettingsScreen, self).__init__(**kwargs)
-        layout = ColoredBoxLayout(orientation='vertical', bg_color=SECONDARY_COLOR)
-        
-        self.loading_popup = CustomPopup(
-            title_text='保存中...',
-            content_widget=Label(
-                text='请稍候...',
+        def __init__(self, **kwargs):
+            super(SettingsScreen, self).__init__(**kwargs)
+            layout = ColoredBoxLayout(orientation='vertical', bg_color=SECONDARY_COLOR)
+                
+            self.loading_popup = CustomPopup(
+                title_text='保存中...',
+                content_widget=Label(
+                    text='请稍候...',
+                    font_name=FONT_PATH,
+                    font_size=POPUP_CONTENT_FONT_SIZE,
+                    halign='center',
+                    valign='middle'
+                ),
+                size_hint=(0.3, 0.3),
+                auto_dismiss=False
+            )
+            self.username_input = TextInput(
+                hint_text='用户名',
                 font_name=FONT_PATH,
-                font_size=POPUP_CONTENT_FONT_SIZE,
+                font_size=BASE_FONT_SIZE,  # 保持初始字体大小
+                background_color=INPUT_BACKGROUND_COLOR,
+                foreground_color=INPUT_TEXT_COLOR,
+                size_hint=(1, 0.1)
+            )
+            self.password_input = TextInput(
+                hint_text='密码',
+                font_name=FONT_PATH,
+                font_size=BASE_FONT_SIZE,  # 保持初始字体大小
+                background_color=INPUT_BACKGROUND_COLOR,
+                foreground_color=INPUT_TEXT_COLOR,
+                password=True,
+                size_hint=(1, 0.1)
+            )
+            save_btn = Button(
+                text='保存',
+                font_name=FONT_PATH,
+                font_size=BUTTON_FONT_SIZE,  # 保持初始字体大小
+                background_color=BUTTON_COLOR,
+                color=BUTTON_TEXT_COLOR,
+                size_hint=(1, 0.1)
+            )
+            save_btn.bind(on_press=self.save_credentials)
+            self.save_btn = save_btn  # 保存按钮引用以便动画使用
+
+            self.status_label = Label(
+                text='',
+                font_name=FONT_PATH,
+                font_size=LABEL_FONT_SIZE,  # 保持初始字体大小
+                color=LABEL_TEXT_COLOR_DARK,
+                size_hint=(1, 0.1),
                 halign='center',
                 valign='middle'
-            ),
-            size_hint=(0.3, 0.3),
-            auto_dismiss=False
-        )
-        self.username_input = TextInput(
-            hint_text='用户名',
-            font_name=FONT_PATH,
-            font_size=BASE_FONT_SIZE,
-            background_color=INPUT_BACKGROUND_COLOR,
-            foreground_color=INPUT_TEXT_COLOR,
-            size_hint=(1, 0.1)
-        )
-        self.password_input = TextInput(
-            hint_text='密码',
-            font_name=FONT_PATH,
-            font_size=BASE_FONT_SIZE,
-            background_color=INPUT_BACKGROUND_COLOR,
-            foreground_color=INPUT_TEXT_COLOR,
-            password=True,
-            size_hint=(1, 0.1)
-        )
-        save_btn = Button(
-            text='保存',
-            font_name=FONT_PATH,
-            font_size=BUTTON_FONT_SIZE,
-            background_color=BUTTON_COLOR,
-            color=BUTTON_TEXT_COLOR,
-            size_hint=(1, 0.1)
-        )
-        save_btn.bind(on_press=self.save_credentials)
-        self.save_btn = save_btn  # 保存按钮引用以便动画使用
+            )
+            self.status_label.bind(size=self.status_label.setter('text_size'))
 
-        self.status_label = Label(
-            text='',
-            font_name=FONT_PATH,
-            font_size=LABEL_FONT_SIZE,
-            color=LABEL_TEXT_COLOR_DARK,
-            size_hint=(1, 0.1),
-            halign='center',
-            valign='middle'
-        )
-        self.status_label.bind(size=self.status_label.setter('text_size'))
+            layout.add_widget(Label(
+                text='设置界面',
+                font_name=FONT_PATH,
+                font_size=LABEL_FONT_SIZE,  # 保持初始字体大小
+                color=LABEL_TEXT_COLOR_DARK,
+                size_hint=(1, 0.1),
+                halign='center',
+                valign='middle'
+            ))
+            layout.add_widget(self.username_input)
+            layout.add_widget(self.password_input)
+            layout.add_widget(save_btn)
+            layout.add_widget(self.status_label)
+                
+            self.add_widget(layout)
+            self.load_credentials()
 
-        layout.add_widget(Label(
-            text='设置界面',
-            font_name=FONT_PATH,
-            font_size=LABEL_FONT_SIZE,
-            color=LABEL_TEXT_COLOR_DARK,
-            size_hint=(1, 0.1),
-            halign='center',
-            valign='middle'
-        ))
-        layout.add_widget(self.username_input)
-        layout.add_widget(self.password_input)
-        layout.add_widget(save_btn)
-        layout.add_widget(self.status_label)
-        
-        self.add_widget(layout)
-        self.load_credentials()
+        def save_credentials(self, instance):
+                # 显示加载弹窗
+            self.loading_popup.open()
+            self.save_btn.disabled = True
 
-    def save_credentials(self, instance):
-        # 显示加载弹窗
-        self.loading_popup.open()
-        self.save_btn.disabled = True
-
-        # 在线程中执行保存操作
-        threading.Thread(target=self._save_credentials_thread, daemon=True).start()
-    
-    def _save_credentials_thread(self):
-        try:
-            username = self.username_input.text
-            password = self.password_input.text
-            credentials = {'username': username, 'password': password}
+            # 在线程中执行保存操作
+            threading.Thread(target=self._save_credentials_thread, daemon=True).start()
             
-            with open(CREDENTIALS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(credentials, f, ensure_ascii=False, indent=4)
-            status_text = '账号和密码已保存'
-            
-            app = App.get_running_app()
-            schedule_screen = app.sm.get_screen('schedule')
-            current_week = get_current_week()
-            
-            # 准备UI更新操作
-            def update_ui(dt):
-                self.status_label.text = status_text
-                schedule_screen.spinner_week.text = f'第{current_week}周 (当前周)'
-                schedule_screen.query_schedule(None)
-                # 关闭加载弹窗并恢复按钮状态
-                self.loading_popup.dismiss()
-                self.save_btn.disabled = False
-            
-            Clock.schedule_once(update_ui)
-        except Exception as e:
-            status_text = f'保存失败: {e}'
-            
-            def update_ui_error(dt):
-                self.status_label.text = status_text
-                # 关闭加载弹窗并恢复按钮状态
-                self.loading_popup.dismiss()
-                self.save_btn.disabled = False
-            
-            Clock.schedule_once(update_ui_error)
-
-    def _update_ui_after_save(self, status_text):
-        self.status_label.text = status_text
-        # 关闭加载弹窗并恢复按钮状态
-        self.loading_popup.dismiss()
-        self.save_btn.disabled = False
-    
-    def load_credentials(self):
-        if os.path.exists(CREDENTIALS_FILE):
+        def _save_credentials_thread(self):
             try:
-                with open(CREDENTIALS_FILE, 'r', encoding='utf-8') as f:
-                    credentials = json.load(f)
-                self.username_input.text = credentials.get('username', '')
-                self.password_input.text = credentials.get('password', '')
+                username = self.username_input.text
+                password = self.password_input.text
+                credentials = {'username': username,
+                               'password': password,
+                               'currentweek':get_current_week(),
+                               'update_week':time.strftime('%W')
+                               }
+                    
+                with open(CREDENTIALS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(credentials, f, ensure_ascii=False, indent=4)
+                status_text = '账号和密码已保存'
+                    
+                app = App.get_running_app()
+                schedule_screen = app.sm.get_screen('schedule')
+                    
+                # 重新初始化 ScheduleScreen
+                def reinitialize_schedule_screen(dt):
+                    app.sm.remove_widget(schedule_screen)
+                    new_schedule_screen = ScheduleScreen(name='schedule')
+                    app.sm.add_widget(new_schedule_screen)
+                    self.status_label.text = status_text
+                    self.loading_popup.dismiss()
+                    self.save_btn.disabled = False
+                    # 不调用 update_font_sizes，以保持设置界面的字体大小不变
+                
+                Clock.schedule_once(reinitialize_schedule_screen)
             except Exception as e:
-                self.status_label.text = f'加载失败: {e}'
+                status_text = f'保存失败: {e}'
+                    
+                def update_ui_error(dt):
+                    self.status_label.text = status_text
+                    # 关闭加载弹窗并恢复按钮状态
+                    self.loading_popup.dismiss()
+                    self.save_btn.disabled = False
+                    
+                Clock.schedule_once(update_ui_error)
 
+        def _update_ui_after_save(self, status_text):
+            self.status_label.text = status_text
+            # 关闭加载弹窗并恢复按钮状态
+            self.loading_popup.dismiss()
+            self.save_btn.disabled = False
+        
+        def load_credentials(self):
+            if os.path.exists(CREDENTIALS_FILE):
+                try:
+                    with open(CREDENTIALS_FILE, 'r', encoding='utf-8') as f:
+                        credentials = json.load(f)
+                    self.username_input.text = credentials.get('username', '')
+                    self.password_input.text = credentials.get('password', '')
+                    
+                except Exception as e:
+                    self.status_label.text = f'加载失败: {e}'
+                    
 class ScheduleApp(App):
     screens_order = ['schedule', 'grades', 'notifications', 'settings']
 

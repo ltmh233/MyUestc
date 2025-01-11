@@ -13,9 +13,8 @@
 1. **克隆仓库**：
 
    ```bash
-   git clone https://github.com/yourusername/ScheduleApp.git
+   git clone https://github.com/ltmh233/MyUestc.git
    ```
-
 2. **安装依赖**：
 
    ```bash
