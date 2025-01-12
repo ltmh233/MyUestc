@@ -5,7 +5,6 @@ import datetime
 import time
 from kivy.animation import Animation
 import threading
-import requests
 from kivy.properties import ListProperty
 from kivy.app import App
 from kivy.uix.button import Button
@@ -64,6 +63,28 @@ class FontScaler:
             'popup_content': base * 1.1
         }
 
+class LimitedScrollView(ScrollView):
+    def on_touch_move(self, touch):
+        if self.collide_point(*touch.pos):
+            # 获取当前的 scroll_y
+            current_scroll = self.scroll_y
+            # 计算新的 scroll_y
+            new_scroll = current_scroll - touch.dy / self.height
+            # 限制 scroll_y 在0到1之间
+            new_scroll = max(0, min(1, new_scroll))
+            self.scroll_y = new_scroll
+            return True
+        return super(LimitedScrollView, self).on_touch_move(touch)
+    
+    def on_scroll_y(self, instance, value):
+        # 限制 scroll_y 在0到1之间
+        self.scroll_y = max(0, min(1, value))
+    
+    def on_touch_move(self, touch):
+        if self.collide_point(*touch.pos):
+            return super(LimitedScrollView, self).on_touch_move(touch)
+        return super(LimitedScrollView, self).on_touch_move(touch)
+
 class CustomPopup(Popup):
     def __init__(self, title_text='', content_widget=None, **kwargs):
         super(CustomPopup, self).__init__(**kwargs)
@@ -90,7 +111,7 @@ class CustomPopup(Popup):
                 text=title_text,
                 font_name=FONT_PATH,
                 font_size=POPUP_TITLE_FONT_SIZE,
-                size_hint=(1, 0.2),
+                size_hint=(1, 0.3),
                 halign='center',
                 valign='middle'
             )
@@ -306,7 +327,7 @@ class CourseDetailPopup(CustomPopup):
         # 创建关闭按钮
         btn_close = Button(
             text='关闭',
-            size_hint=(0.3, 0.2),
+            size_hint=(0.3, 0.3),
             pos_hint={'center_x': 0.5},
             background_normal='',
             background_color=PRIMARY_COLOR,
@@ -392,7 +413,41 @@ class ScheduleScreen(Screen):
         query_layout = BoxLayout(orientation='horizontal', size_hint=(1, 0.1), spacing=10, padding=10)
         self.days = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']
         self.sample_schedule = {day: [''] * 12 for day in self.days}
-            
+        self.operate_data()
+        self.color_list = [
+            [0.20, 0.60, 0.86, 1],   # 蓝色
+            [0.46, 0.80, 0.45, 1],   # 绿色
+            [0.93, 0.69, 0.13, 1],   # 橙色
+            [0.89, 0.39, 0.28, 1],   # 红色
+            [0.54, 0.17, 0.89, 1],   # 紫色
+            [0.99, 0.63, 0.78, 1],   # 粉色
+            [0.64, 0.08, 0.18, 1],   # 深红色
+            [0.30, 0.75, 0.93, 1],   # 天蓝色
+            [0.34, 0.93, 0.37, 1],   # 明亮绿色
+            [0.98, 0.75, 0.28, 1],   # 黄橙色
+            [0.27, 0.52, 0.96, 1],   # 皇家蓝
+            [0.79, 0.13, 0.24, 1],   # 绯红色
+            [0.85, 0.44, 0.84, 1],   # 薰衣草色
+            [0.95, 0.85, 0.25, 1],   # 芥末色
+            [0.75, 0.37, 0.62, 1],   # 淡紫色
+            [0.60, 0.80, 0.20, 1],   # 石灰色
+            [0.50, 0.50, 0.50, 1],   # 灰色
+            [0.35, 0.70, 0.90, 1],   # 浅蓝色
+            [0.90, 0.50, 0.80, 1],   # 洋红色
+            [0.15, 0.75, 0.60, 1],   # 青色
+            [0.60, 0.40, 0.80, 1],   # 靛色
+            [0.70, 0.30, 0.30, 1],   # 棕红色
+            [0.40, 0.80, 0.70, 1],   # 薄荷色
+            [0.85, 0.60, 0.10, 1],   # 琥珀色
+            [0.90, 0.10, 0.40, 1],   # 桃红色
+            [0.50, 0.60, 0.80, 1],   # 石板蓝色
+            [0.70, 0.80, 0.20, 1],   # 查特酒绿
+            [0.85, 0.45, 0.55, 1],   # 玫瑰色
+            [0.25, 0.65, 0.30, 1],   # 森林绿
+            [0.80, 0.70, 0.30, 1],   # 橄榄色
+            [0.95, 0.20, 0.60, 1],   # 热粉色
+            [0.10, 0.60, 0.70, 1],   # 青绿色
+        ]
             # 添加“上一周”按钮
         btn_prev_week = Button(
             text='上一周',
@@ -404,23 +459,7 @@ class ScheduleScreen(Screen):
             color=BUTTON_TEXT_COLOR
         )
         btn_prev_week.bind(on_press=self.prev_week)
-
-        with open('./data/credentials.json', 'r', encoding='utf-8') as f:
-            credentials = json.load(f)
-            username = credentials.get('username', '')
-            current_week = credentials.get('currentweek','')
-            update_week = credentials.get('update_week','')
-        
-        if int(time.strftime('%W')) - int(update_week) > 0:
-            current_week = get_current_week()
-            credentials['currentweek'] = current_week
-            credentials['update_week'] = time.strftime('%W')
-            with open('./data/credentials.json', 'w', encoding='utf-8') as f:
-                json.dump(credentials, f, ensure_ascii=False, indent=4)
-        
-        self.current_week = current_week
-        self.outstanding_current_week = current_week
-            
+     
             # 修改spinner_week的size_hint以适应新增按钮
         self.spinner_week = Spinner(
             text=f'第{self.current_week}周 (当前周)',
@@ -463,7 +502,7 @@ class ScheduleScreen(Screen):
 
         layout.add_widget(query_layout)
         
-        scroll_view = ScrollView(size_hint=(1, 0.8))
+        scroll_view = LimitedScrollView(size_hint=(1, 0.8))
         self.table_layout = GridLayout(
             cols=8, 
             rows=13, 
@@ -477,9 +516,9 @@ class ScheduleScreen(Screen):
         self.min_cell_height = 480  # 新增最小高度
 
         # 获取当前周的日期
-        current_week_dates = self.get_week_dates(current_week)
+        current_week_dates = self.get_week_dates(self.current_week)
         headers = ['时间/星期']
-        for day in ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日']:
+        for day in self.days:
             date_str = current_week_dates.get(day, '')
             headers.append(f'{day}\n{date_str}')
 
@@ -544,7 +583,30 @@ class ScheduleScreen(Screen):
                     row=row,
                     col=col
                 ))
-     
+        
+        scroll_view.add_widget(self.table_layout)
+        layout.add_widget(scroll_view)
+        self.add_widget(layout)
+                
+        self.query_schedule(None)
+
+    def operate_data(self):
+        with open(CREDENTIALS_FILE, 'r', encoding='utf-8') as f:
+            credentials = json.load(f)
+            username = credentials.get('username', '')
+            current_week = credentials.get('currentweek','')
+            update_week = credentials.get('update_week','')
+        
+        if int(time.strftime('%W')) - int(update_week) > 0:
+            current_week = get_current_week()
+            credentials['currentweek'] = current_week
+            credentials['update_week'] = time.strftime('%W')
+            with open(CREDENTIALS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(credentials, f, ensure_ascii=False, indent=4)
+        
+        self.current_week = current_week
+        self.outstanding_current_week = current_week
+        
         with open('./data/course.json', 'r', encoding='utf-8') as f:
             if f.read() == '':
                 course_data = get_course_schedule(username)
@@ -635,12 +697,11 @@ class ScheduleScreen(Screen):
             with open('./data/course_details.json', 'w', encoding='utf-8') as f:
                 json.dump(course_details, f, ensure_ascii=False, indent=4)
         
-        scroll_view.add_widget(self.table_layout)
-        layout.add_widget(scroll_view)
-        self.add_widget(layout)
-                
+    
+    def rebuild(self):
+        self.operate_data()
         self.query_schedule(None)
-
+    
     def prev_week(self, instance):
         if self.outstanding_current_week > 1:
             self.outstanding_current_week -= 1
@@ -729,7 +790,7 @@ class ScheduleScreen(Screen):
     
     def populate_table(self, week):
         # 获取指定周的日期
-        with open('./data/credentials.json', 'r', encoding='utf-8') as f:
+        with open(CREDENTIALS_FILE, 'r', encoding='utf-8') as f:
             credentials = json.load(f)
             update_week = credentials.get('update_week','')
         
@@ -738,7 +799,7 @@ class ScheduleScreen(Screen):
             self.current_week = current_week
             credentials['currentweek'] = current_week
             credentials['update_week'] = time.strftime('%W')
-            with open('./data/credentials.json', 'w', encoding='utf-8') as f:
+            with open(CREDENTIALS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(credentials, f, ensure_ascii=False, indent=4)
         
         week_dates = self.get_week_dates(week)
@@ -770,40 +831,7 @@ class ScheduleScreen(Screen):
                     self.sample_schedule[xqj][i - 1] = self.coursename_add(course['c_name']) + '\n \n' + self.coursename_add(course['room_name'])
         
         # 填充课程信息
-        color_list = [
-            [0.20, 0.60, 0.86, 1],   # 蓝色
-            [0.46, 0.80, 0.45, 1],   # 绿色
-            [0.93, 0.69, 0.13, 1],   # 橙色
-            [0.89, 0.39, 0.28, 1],   # 红色
-            [0.54, 0.17, 0.89, 1],   # 紫色
-            [0.99, 0.63, 0.78, 1],   # 粉色
-            [0.64, 0.08, 0.18, 1],   # 深红色
-            [0.30, 0.75, 0.93, 1],   # 天蓝色
-            [0.34, 0.93, 0.37, 1],   # 明亮绿色
-            [0.98, 0.75, 0.28, 1],   # 黄橙色
-            [0.27, 0.52, 0.96, 1],   # 皇家蓝
-            [0.79, 0.13, 0.24, 1],   # 绯红色
-            [0.85, 0.44, 0.84, 1],   # 薰衣草色
-            [0.95, 0.85, 0.25, 1],   # 芥末色
-            [0.75, 0.37, 0.62, 1],   # 淡紫色
-            [0.60, 0.80, 0.20, 1],   # 石灰色
-            [0.50, 0.50, 0.50, 1],   # 灰色
-            [0.35, 0.70, 0.90, 1],   # 浅蓝色
-            [0.90, 0.50, 0.80, 1],   # 洋红色
-            [0.15, 0.75, 0.60, 1],   # 青色
-            [0.60, 0.40, 0.80, 1],   # 靛色
-            [0.70, 0.30, 0.30, 1],   # 棕红色
-            [0.40, 0.80, 0.70, 1],   # 薄荷色
-            [0.85, 0.60, 0.10, 1],   # 琥珀色
-            [0.90, 0.10, 0.40, 1],   # 桃红色
-            [0.50, 0.60, 0.80, 1],   # 石板蓝色
-            [0.70, 0.80, 0.20, 1],   # 查特酒绿
-            [0.85, 0.45, 0.55, 1],   # 玫瑰色
-            [0.25, 0.65, 0.30, 1],   # 森林绿
-            [0.80, 0.70, 0.30, 1],   # 橄榄色
-            [0.95, 0.20, 0.60, 1],   # 热粉色
-            [0.10, 0.60, 0.70, 1],   # 青绿色
-        ]
+        
         for day_index, day in enumerate(self.days, 1):
             courses = self.sample_schedule.get(day, [])
             for period_index, course in enumerate(courses, 1):
@@ -815,7 +843,7 @@ class ScheduleScreen(Screen):
                         if target_widget.row != 0 and target_widget.col != 0:
                             target_widget.text = course
                             # 设置背景颜色并添加多层渐变效果
-                            target_widget.background_color = color_list[self.course_list.index(course_name) % len(color_list)]
+                            target_widget.background_color = self.color_list[self.course_list.index(course_name) % len(self.color_list)]
                             
 class GradesScreen(Screen):
     def __init__(self, **kwargs):
@@ -950,9 +978,7 @@ class SettingsScreen(Screen):
                     
                 # 重新初始化 ScheduleScreen
                 def reinitialize_schedule_screen(dt):
-                    app.sm.remove_widget(schedule_screen)
-                    new_schedule_screen = ScheduleScreen(name='schedule')
-                    app.sm.add_widget(new_schedule_screen)
+                    schedule_screen.rebuild()
                     self.status_label.text = status_text
                     self.loading_popup.dismiss()
                     self.save_btn.disabled = False
